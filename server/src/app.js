@@ -1,6 +1,7 @@
 import cors from "cors";
 import express from "express";
 import { pool } from "./db.js";
+import routes, { apiErrorHandler } from "./routes.js";
 
 const app = express();
 const clientOrigin = process.env.CLIENT_ORIGIN || "http://localhost:5173";
@@ -21,18 +22,19 @@ app.get("/api/health", async (_request, response) => {
   }
 });
 
+app.use("/api", routes);
+
 app.use((_request, response) => {
   response.status(404).json({ error: "요청한 API를 찾을 수 없습니다." });
 });
 
-app.use((error, _request, response, _next) => {
+app.use((error, _request, response, next) => {
   if (error instanceof SyntaxError && "body" in error) {
     response.status(400).json({ error: "요청 본문이 올바른 JSON 형식이 아닙니다." });
     return;
   }
 
-  console.error(error);
-  response.status(500).json({ error: "서버 내부 오류가 발생했습니다." });
+  apiErrorHandler(error, _request, response, next);
 });
 
 export default app;

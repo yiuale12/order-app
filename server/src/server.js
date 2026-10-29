@@ -1,10 +1,11 @@
 import app from "./app.js";
+import { initializeDatabase } from "./database.js";
 import { pool } from "./db.js";
 
 const port = Number(process.env.PORT) || 3000;
 
 try {
-  await pool.query("SELECT 1");
+  await initializeDatabase();
 
   const server = app.listen(port, () => {
     console.log(`COZY API server is running at http://localhost:${port}`);

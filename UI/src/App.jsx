@@ -1,66 +1,77 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import './App.css'
-
-const menu = [
-  {
-    id: 'americano-ice',
-    name: '아메리카노 (ICE)',
-    description: '맑고 산뜻하게, 매일 마시고 싶은 아이스 커피.',
-    price: 4000,
-    image: '/images/americano-ice.svg',
-    imageAlt: '얼음과 커피 원두가 담긴 아이스 아메리카노',
-    label: 'COZY SIGNATURE',
-    options: [
-      { id: 'shot', name: '샷 추가', price: 500 },
-      { id: 'syrup', name: '시럽 추가', price: 0 },
-    ],
-  },
-  {
-    id: 'americano-hot',
-    name: '아메리카노 (HOT)',
-    description: '고소한 원두의 깊은 향을 따뜻하게 즐겨보세요.',
-    price: 4000,
-    image: '/images/americano-hot.svg',
-    imageAlt: '머그잔에 담긴 따뜻한 블랙 커피',
-    label: 'ALL-TIME FAVORITE',
-    options: [
-      { id: 'shot', name: '샷 추가', price: 500 },
-      { id: 'syrup', name: '시럽 추가', price: 0 },
-    ],
-  },
-  {
-    id: 'cafe-latte',
-    name: '카페라떼',
-    description: '에스프레소와 부드러운 우유가 만난 포근한 한 잔.',
-    price: 5000,
-    image: '/images/cafe-latte.svg',
-    imageAlt: '라떼 아트가 올려진 카페라떼',
-    label: 'SOFT & CREAMY',
-    options: [
-      { id: 'shot', name: '샷 추가', price: 500 },
-      { id: 'syrup', name: '시럽 추가', price: 0 },
-    ],
-  },
-]
 
 const formatPrice = (price) => `${price.toLocaleString('ko-KR')}원`
 
-const initialOrders = [
-  {
-    id: 'COZY-001',
-    createdAt: '2026-10-15T09:00:00',
-    items: [
-      {
-        name: '아메리카노 (ICE)',
-        options: [],
-        unitPrice: 4000,
-        quantity: 1,
-      },
-    ],
-    total: 4000,
-    status: '주문 접수',
+const menuPresentation = {
+  '아메리카노 (ICE)': {
+    imageAlt: '얼음과 커피 원두가 담긴 아이스 아메리카노',
+    label: 'COZY SIGNATURE',
   },
-]
+  '아메리카노 (HOT)': {
+    imageAlt: '머그잔에 담긴 따뜻한 블랙 커피',
+    label: 'ALL-TIME FAVORITE',
+  },
+  카페라떼: {
+    imageAlt: '라떼 아트가 올려진 카페라떼',
+    label: 'SOFT & CREAMY',
+  },
+}
+
+const statusLabels = {
+  received: '주문 접수',
+  preparing: '제조 중',
+  completed: '제조 완료',
+}
+
+async function apiRequest(path, options = {}) {
+  const response = await fetch(path, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  })
+  const data = await response.json()
+
+  if (!response.ok) {
+    throw new Error(data.error || '요청을 처리하지 못했습니다.')
+  }
+
+  return data
+}
+
+function normalizeMenu(menu) {
+  return {
+    ...menu,
+    image: menu.imageUrl,
+    imageAlt: menuPresentation[menu.name]?.imageAlt ?? `${menu.name} 커피`,
+    label: menuPresentation[menu.name]?.label ?? 'COZY COFFEE',
+  }
+}
+
+function normalizeOrder(order) {
+  return {
+    ...order,
+    createdAt: order.createdAt,
+    status: statusLabels[order.status] ?? order.status,
+    items: order.items.map((item) => ({
+      ...item,
+      options: item.options ?? [],
+    })),
+  }
+}
+
+async function fetchAppData() {
+  const [menuData, orderData] = await Promise.all([
+    apiRequest('/api/menus'),
+    apiRequest('/api/orders'),
+  ])
+  return {
+    products: menuData.map(normalizeMenu),
+    orders: orderData.map(normalizeOrder),
+  }
+}
 
 function getStockStatus(stock) {
   if (stock === 0) return '품절'
@@ -80,14 +91,62 @@ function formatOrderDate(date) {
 
 function App() {
   const [selectedOptions, setSelectedOptions] = useState({})
+  const [menu, setMenu] = useState([])
   const [cart, setCart] = useState([])
   const [notice, setNotice] = useState('')
+  const [errorMessage, setErrorMessage] = useState('')
   const [sessionDate] = useState(() => new Date())
   const [currentPage, setCurrentPage] = useState('order')
-  const [inventory, setInventory] = useState(
-    menu.map((product) => ({ id: product.id, name: product.name, stock: 10 })),
-  )
-  const [orders, setOrders] = useState(initialOrders)
+  const [inventory, setInventory] = useState([])
+  const [orders, setOrders] = useState([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [isSubmittingOrder, setIsSubmittingOrder] = useState(false)
+
+  async function refreshServerData(showLoading = false) {
+    if (showLoading) {
+      setIsLoading(true)
+      setErrorMessage('')
+    }
+    try {
+      const { products, orders: serverOrders } = await fetchAppData()
+      setMenu(products)
+      setInventory(
+        products.map((product) => ({
+          id: product.id,
+          name: product.name,
+          stock: product.stockQuantity,
+        })),
+      )
+      setOrders(serverOrders)
+    } catch (error) {
+      setErrorMessage(error.message || '서버에서 데이터를 불러오지 못했습니다.')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    async function loadInitialData() {
+      try {
+        const { products, orders: serverOrders } = await fetchAppData()
+        setMenu(products)
+        setInventory(
+          products.map((product) => ({
+            id: product.id,
+            name: product.name,
+            stock: product.stockQuantity,
+          })),
+        )
+        setOrders(serverOrders)
+      } catch (error) {
+        setErrorMessage(error.message || '서버에서 데이터를 불러오지 못했습니다.')
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    loadInitialData()
+  }, [])
 
   const cartCount = cart.reduce((count, item) => count + item.quantity, 0)
   const total = cart.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0)
@@ -122,6 +181,8 @@ function App() {
         ...current,
         {
           key,
+          menuId: product.id,
+          optionIds,
           name: product.name,
           options,
           unitPrice,
@@ -130,6 +191,7 @@ function App() {
       ]
     })
     setNotice('')
+    setErrorMessage('')
   }
 
   function updateQuantity(key, change) {
@@ -143,45 +205,80 @@ function App() {
         .filter((item) => item.quantity > 0),
     )
     setNotice('')
+    setErrorMessage('')
   }
 
-  function placeOrder() {
-    if (cart.length === 0) return
+  async function placeOrder() {
+    if (cart.length === 0 || isSubmittingOrder) return
 
-    const order = {
-      id: `COZY-${String(orders.length + 1).padStart(3, '0')}`,
-      createdAt: sessionDate,
-      items: cart.map(({ name, options, unitPrice, quantity }) => ({
-        name,
-        options,
-        unitPrice,
-        quantity,
-      })),
-      total,
-      status: '주문 접수',
+    setIsSubmittingOrder(true)
+    setNotice('')
+    setErrorMessage('')
+    try {
+      const order = await apiRequest('/api/orders', {
+        method: 'POST',
+        body: JSON.stringify({
+          items: cart.map(({ menuId, quantity, optionIds }) => ({
+            menuId,
+            quantity,
+            optionIds,
+          })),
+        }),
+      })
+      const latestMenus = (await apiRequest('/api/menus')).map(normalizeMenu)
+      setMenu(latestMenus)
+      setOrders((current) => [normalizeOrder(order), ...current])
+      setCart([])
+      setSelectedOptions({})
+      setInventory(
+        latestMenus.map((product) => ({
+          id: product.id,
+          name: product.name,
+          stock: product.stockQuantity,
+        })),
+      )
+      setNotice('주문이 접수되었습니다! 맛있는 커피를 준비할게요.')
+    } catch (error) {
+      setErrorMessage(error.message || '주문을 접수하지 못했습니다.')
+    } finally {
+      setIsSubmittingOrder(false)
     }
-    setOrders((current) => [order, ...current])
-    setCart([])
-    setSelectedOptions({})
-    setNotice('주문이 접수되었습니다! 맛있는 커피를 준비할게요. (데모)')
   }
 
-  function adjustStock(menuId, change) {
-    setInventory((current) =>
-      current.map((item) =>
-        item.id === menuId
-          ? { ...item, stock: Math.max(0, item.stock + change) }
-          : item,
-      ),
-    )
+  async function adjustStock(menuId, change) {
+    setErrorMessage('')
+    try {
+      const updatedMenu = await apiRequest(`/api/menus/${menuId}/stock`, {
+        method: 'PATCH',
+        body: JSON.stringify({ adjustment: change }),
+      })
+      setInventory((current) =>
+        current.map((item) =>
+          item.id === menuId ? { ...item, stock: updatedMenu.stockQuantity } : item,
+        ),
+      )
+    } catch (error) {
+      setErrorMessage(error.message || '재고를 변경하지 못했습니다.')
+    }
   }
 
-  function updateOrderStatus(orderId, status) {
-    setOrders((current) =>
-      current.map((order) =>
-        order.id === orderId ? { ...order, status } : order,
-      ),
-    )
+  async function updateOrderStatus(orderId, status) {
+    const apiStatus = Object.entries(statusLabels).find(([, label]) => label === status)?.[0]
+    if (!apiStatus) return
+
+    setErrorMessage('')
+    try {
+      const updatedOrder = await apiRequest(`/api/orders/${orderId}/status`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status: apiStatus }),
+      })
+      const normalizedOrder = normalizeOrder(updatedOrder)
+      setOrders((current) =>
+        current.map((order) => (order.id === orderId ? normalizedOrder : order)),
+      )
+    } catch (error) {
+      setErrorMessage(error.message || '주문 상태를 변경하지 못했습니다.')
+    }
   }
 
   return (
@@ -212,6 +309,7 @@ function App() {
             onClick={(event) => {
               event.preventDefault()
               setCurrentPage('admin')
+              refreshServerData(true)
             }}
           >
             관리자
@@ -224,6 +322,12 @@ function App() {
           )}
         </nav>
       </header>
+
+      {errorMessage && (
+        <div className="api-error" role="alert">
+          {errorMessage}
+        </div>
+      )}
 
       {currentPage === 'order' ? (
         <main id="order" className="page-content">
@@ -249,7 +353,9 @@ function App() {
           </div>
 
           <div className="menu-grid">
-            {menu.length === 0 ? (
+            {isLoading ? (
+              <div className="empty-menu">메뉴를 불러오는 중이에요.</div>
+            ) : menu.length === 0 ? (
               <div className="empty-menu">지금은 준비된 메뉴가 없어요. 잠시 후 다시 찾아주세요.</div>
             ) : (
               menu.map((product, index) => (
@@ -359,11 +465,11 @@ function App() {
             </div>
             <button
               className="order-button"
-              disabled={cart.length === 0}
+              disabled={cart.length === 0 || isSubmittingOrder}
               onClick={placeOrder}
               type="button"
             >
-              주문하기 <span aria-hidden="true">→</span>
+              {isSubmittingOrder ? '접수 중...' : '주문하기'} <span aria-hidden="true">→</span>
             </button>
             <p>결제 없이 주문을 접수합니다.</p>
           </aside>
@@ -382,6 +488,7 @@ function App() {
             today={sessionDate}
             onAdjustStock={adjustStock}
             onUpdateOrderStatus={updateOrderStatus}
+            isLoading={isLoading}
           />
           <footer className="page-footer">
             <span>COZY<span>.</span> COFFEE SHOP</span>
@@ -399,6 +506,7 @@ function AdminDashboard({
   today,
   onAdjustStock,
   onUpdateOrderStatus,
+  isLoading,
 }) {
   const metrics = [
     { label: '총 주문', value: orders.length, icon: '01', tone: 'total' },
@@ -477,7 +585,9 @@ function AdminDashboard({
           <span className="admin-section-note">재고를 1개씩 조정할 수 있어요.</span>
         </div>
         <div className="inventory-grid">
-          {inventory.map((item) => {
+          {isLoading ? (
+            <div className="empty-menu">재고를 불러오는 중이에요.</div>
+          ) : inventory.map((item) => {
             const status = getStockStatus(item.stock)
             return (
               <article className="inventory-card" key={item.id}>
@@ -533,7 +643,7 @@ function AdminDashboard({
           </div>
         ) : (
           <div className="order-list">
-            {orders.map((order, index) => {
+            {orders.map((order) => {
               const nextStatus =
                 order.status === '주문 접수'
                   ? '제조 중'
@@ -544,7 +654,7 @@ function AdminDashboard({
                 <article className="admin-order-card" key={order.id}>
                   <div className="order-number">
                     <span>ORDER</span>
-                    <strong>#{String(orders.length - index).padStart(3, '0')}</strong>
+                    <strong>#{String(order.id).padStart(3, '0')}</strong>
                   </div>
                   <div className="admin-order-detail">
                     <div className="order-meta">

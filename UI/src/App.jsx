@@ -25,17 +25,34 @@ const statusLabels = {
 }
 
 async function apiRequest(path, options = {}) {
-  const response = await fetch(path, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
-  })
-  const data = await response.json()
+  let response
+  try {
+    response = await fetch(path, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        ...options.headers,
+      },
+    })
+  } catch {
+    throw new Error('서버에 연결할 수 없습니다. 백엔드 서버가 실행 중인지 확인해 주세요.')
+  }
+
+  const responseText = await response.text()
+  let data
+  try {
+    data = responseText ? JSON.parse(responseText) : {}
+  } catch {
+    throw new Error(
+      `서버 응답을 읽을 수 없습니다. (HTTP ${response.status}) 잠시 후 다시 시도해 주세요.`,
+    )
+  }
 
   if (!response.ok) {
-    throw new Error(data.error || '요청을 처리하지 못했습니다.')
+    throw new Error(data.error || `요청을 처리하지 못했습니다. (HTTP ${response.status})`)
+  }
+  if (!responseText) {
+    throw new Error('서버에서 빈 응답을 받았습니다. 잠시 후 다시 시도해 주세요.')
   }
 
   return data
@@ -257,6 +274,13 @@ function App() {
           item.id === menuId ? { ...item, stock: updatedMenu.stockQuantity } : item,
         ),
       )
+      setMenu((current) =>
+        current.map((item) =>
+          item.id === menuId
+            ? { ...item, stockQuantity: updatedMenu.stockQuantity }
+            : item,
+        ),
+      )
     } catch (error) {
       setErrorMessage(error.message || '재고를 변경하지 못했습니다.')
     }
@@ -298,6 +322,7 @@ function App() {
             onClick={(event) => {
               event.preventDefault()
               setCurrentPage('order')
+              refreshServerData(true)
             }}
           >
             주문하기
@@ -368,7 +393,11 @@ function App() {
                   <div className="menu-card-content">
                     <div className="product-heading">
                       <h3>{product.name}</h3>
-                      <span className="product-price">{formatPrice(product.price)}</span>
+                      {product.stockQuantity === 0 ? (
+                        <span className="availability-badge">품절</span>
+                      ) : (
+                        <span className="product-price">{formatPrice(product.price)}</span>
+                      )}
                     </div>
                     <p className="product-description">{product.description}</p>
                     <div className="option-list" aria-label={`${product.name} 추가 옵션`}>
@@ -389,10 +418,13 @@ function App() {
                     <button
                       className="add-button"
                       onClick={() => addToCart(product)}
+                      disabled={product.stockQuantity === 0}
                       type="button"
                     >
-                      <span>장바구니에 담기</span>
-                      <span className="add-arrow" aria-hidden="true">↗</span>
+                      <span>{product.stockQuantity === 0 ? '품절' : '장바구니에 담기'}</span>
+                      {product.stockQuantity > 0 && (
+                        <span className="add-arrow" aria-hidden="true">↗</span>
+                      )}
                     </button>
                   </div>
                 </article>
@@ -426,13 +458,17 @@ function App() {
                   <li className="cart-item" key={item.key}>
                     <div className="cart-item-detail">
                       <span className="cart-item-name">{item.name}</span>
+                      <span className="cart-item-quantity">× {item.quantity}</span>
                       <span className="cart-item-options">
                         {item.options.length > 0
                           ? item.options.map((option) => option.name).join(' · ')
                           : '기본'}
                       </span>
                     </div>
-                    <div className="quantity-control" aria-label={`${item.name} 수량`}>
+                    <div
+                      className="quantity-control"
+                      aria-label={`${item.name} 주문 수량 조절, 현재 ${item.quantity}개`}
+                    >
                       <button
                         aria-label={`${item.name} 수량 줄이기`}
                         onClick={() => updateQuantity(item.key, -1)}
@@ -440,7 +476,6 @@ function App() {
                       >
                         −
                       </button>
-                      <span>{item.quantity}</span>
                       <button
                         aria-label={`${item.name} 수량 늘리기`}
                         onClick={() => updateQuantity(item.key, 1)}
